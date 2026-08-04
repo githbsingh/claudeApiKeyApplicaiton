@@ -12,11 +12,29 @@ class ChatService:
     def __init__(self):
         self.client = get_bedrock_client()
 
-    def chat(self, user_message: str) -> str:
+    def chat(
+        self,
+        conversation_history: list
+    ) -> str:
         """
-        Send a user message to Claude
-        and return the generated response.
+        Send the complete conversation
+        history to Claude.
         """
+
+        bedrock_messages = []
+
+        for message in conversation_history:
+
+            bedrock_messages.append(
+                {
+                    "role": message["role"],
+                    "content": [
+                        {
+                            "text": message["content"]
+                        }
+                    ]
+                }
+            )
 
         response = self.client.converse(
             modelId=BEDROCK_MODEL_ID,
@@ -27,16 +45,7 @@ class ChatService:
                 }
             ],
 
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "text": user_message
-                        }
-                    ]
-                }
-            ],
+            messages=bedrock_messages,
 
             inferenceConfig={
                 "maxTokens": MAX_TOKENS,
@@ -44,6 +53,9 @@ class ChatService:
             }
         )
 
-        return response[
-            "output"
-        ]["message"]["content"][0]["text"]
+        return (
+            response["output"]
+            ["message"]
+            ["content"][0]
+            ["text"]
+        )
