@@ -1,42 +1,60 @@
 import os
 
+import streamlit as st
 from dotenv import load_dotenv
+
 
 load_dotenv()
 
-AWS_REGION = os.getenv(
+
+def get_setting(
+    key: str,
+    default=None
+):
+    """
+    Read configuration from Streamlit Secrets
+    or local environment variables.
+    """
+
+    if key in st.secrets:
+        return st.secrets[key]
+
+    return os.getenv(
+        key,
+        default
+    )
+
+
+AWS_REGION = get_setting(
     "AWS_REGION",
     "ap-southeast-2"
 )
 
-ACCESS_KEY_ID = os.getenv(
-    "AWS_ACCESS_KEY_ID"
-)
-
-SECRET_ACCESS_KEY = os.getenv(
-    "AWS_SECRET_ACCESS_KEY"
-)
-
-BEDROCK_MODEL_ID = os.getenv(
+BEDROCK_MODEL_ID = get_setting(
     "BEDROCK_MODEL_ID"
 )
 
 MAX_TOKENS = int(
-    os.getenv("MAX_TOKENS", "500")
+    get_setting(
+        "MAX_TOKENS",
+        "500"
+    )
 )
 
 TEMPERATURE = float(
-    os.getenv("TEMPERATURE", "0.7")
+    get_setting(
+        "TEMPERATURE",
+        "0.7"
+    )
 )
 
 
-
-
 def validate_settings():
-    """Validate required application settings."""
+    """Validate required settings."""
 
     if not BEDROCK_MODEL_ID:
         raise ValueError(
             "BEDROCK_MODEL_ID is missing. "
-            "Add it to the .env file."
+            "Add it to Streamlit Secrets "
+            "or your local .env file."
         )
