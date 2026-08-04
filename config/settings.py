@@ -30,6 +30,14 @@ AWS_REGION = get_setting(
     "ap-southeast-2"
 )
 
+AWS_ACCESS_KEY_ID = get_setting(
+    "AWS_ACCESS_KEY_ID"
+)
+
+AWS_SECRET_ACCESS_KEY = get_setting(
+    "AWS_SECRET_ACCESS_KEY"
+)
+
 BEDROCK_MODEL_ID = get_setting(
     "BEDROCK_MODEL_ID"
 )
