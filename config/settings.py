@@ -16,8 +16,12 @@ def get_setting(
     or local environment variables.
     """
 
-    if key in st.secrets:
-        return st.secrets[key]
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except st.errors.StreamlitSecretNotFoundError:
+        # Running locally without .streamlit/secrets.toml
+        pass
 
     return os.getenv(
         key,

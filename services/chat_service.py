@@ -1,10 +1,10 @@
-from config.prompts import SYSTEM_PROMPT
+from services.bedrock_client import get_bedrock_client
+
 from config.settings import (
     BEDROCK_MODEL_ID,
     MAX_TOKENS,
-    TEMPERATURE
+    TEMPERATURE,
 )
-from services.bedrock_client import get_bedrock_client
 
 
 class ChatService:
@@ -12,50 +12,80 @@ class ChatService:
     def __init__(self):
         self.client = get_bedrock_client()
 
-    def chat(
-        self,
-        conversation_history: list
-    ) -> str:
+    def chat(self, conversation_history):
         """
-        Send the complete conversation
-        history to Claude.
+        Normal non-streaming response.
         """
 
-        bedrock_messages = []
-
-        for message in conversation_history:
-
-            bedrock_messages.append(
-                {
-                    "role": message["role"],
-                    "content": [
-                        {
-                            "text": message["content"]
-                        }
-                    ]
-                }
-            )
+        messages = self._build_messages(
+            conversation_history
+        )
 
         response = self.client.converse(
             modelId=BEDROCK_MODEL_ID,
-
-            system=[
-                {
-                    "text": SYSTEM_PROMPT
-                }
-            ],
-
-            messages=bedrock_messages,
-
+            messages=messages,
             inferenceConfig={
                 "maxTokens": MAX_TOKENS,
-                "temperature": TEMPERATURE
-            }
+                "temperature": TEMPERATURE,
+            },
         )
 
-        return (
-            response["output"]
-            ["message"]
-            ["content"][0]
-            ["text"]
+        return response["output"]["message"]["content"][0]["text"]
+
+    def stream_chat(self, conversation_history):
+        """
+        Stream Claude's response from Amazon Bedrock.
+        """
+
+        messages = self._build_messages(
+            conversation_history
         )
+
+        response = self.client.converse_stream(
+            modelId=BEDROCK_MODEL_ID,
+            messages=messages,
+            inferenceConfig={
+                "maxTokens": MAX_TOKENS,
+                "temperature": TEMPERATURE,
+            },
+        )
+
+        for event in response["stream"]:
+
+            # Claude text delta
+            if "contentBlockDelta" in event:
+
+                delta = event["contentBlockDelta"]
+
+                if "delta" in delta:
+                    text = delta["delta"].get("text")
+
+                    if text:
+                        yield text
+
+    @staticmethod
+    def _build_messages(conversation_history):
+        """
+        Convert our conversation memory format
+        into Amazon Bedrock Converse format.
+        """
+
+        messages = []
+
+        for message in conversation_history:
+
+            role = message["role"]
+            content = message["content"]
+
+            messages.append(
+                {
+                    "role": role,
+                    "content": [
+                        {
+                            "text": content
+                        }
+                    ],
+                }
+            )
+
+        return messages
