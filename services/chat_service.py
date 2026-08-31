@@ -6,86 +6,189 @@ from config.settings import (
     TEMPERATURE,
 )
 
+from tools.registry import (
+    TOOLS,
+    execute_tool,
+)
+
 
 class ChatService:
 
     def __init__(self):
+
         self.client = get_bedrock_client()
 
+    # ========================================================
+    # NORMAL CHAT
+    # ========================================================
+
     def chat(self, conversation_history):
-        """
-        Normal non-streaming response.
-        """
 
         messages = self._build_messages(
             conversation_history
         )
 
-        response = self.client.converse(
-            modelId=BEDROCK_MODEL_ID,
-            messages=messages,
-            inferenceConfig={
-                "maxTokens": MAX_TOKENS,
-                "temperature": TEMPERATURE,
-            },
+        return self._run_agent(
+            messages
         )
 
-        return response["output"]["message"]["content"][0]["text"]
+    # ========================================================
+    # AGENT LOOP
+    # ========================================================
+
+    def _run_agent(self, messages):
+
+        while True:
+
+            response = self.client.converse(
+
+                modelId=BEDROCK_MODEL_ID,
+
+                messages=messages,
+
+                toolConfig={
+                    "tools": TOOLS
+                },
+
+                inferenceConfig={
+                    "maxTokens": MAX_TOKENS,
+                    "temperature": TEMPERATURE,
+                },
+            )
+
+            output = response["output"]["message"]
+
+            stop_reason = response.get(
+                "stopReason"
+            )
+
+            # ------------------------------------------------
+            # Claude wants to use a tool
+            # ------------------------------------------------
+
+            if stop_reason == "tool_use":
+
+                messages.append(
+                    output
+                )
+
+                tool_results = []
+
+                for content_block in output["content"]:
+
+                    if "toolUse" not in content_block:
+                        continue
+
+                    tool_use = content_block["toolUse"]
+
+                    tool_name = tool_use["name"]
+
+                    tool_input = tool_use["input"]
+
+                    tool_use_id = tool_use["toolUseId"]
+
+                    # Execute our Python function
+                    result = execute_tool(
+                        tool_name,
+                        tool_input
+                    )
+
+                    tool_results.append(
+                        {
+                            "toolResult": {
+                                "toolUseId": tool_use_id,
+                                "content": [
+                                    {
+                                        "text": result
+                                    }
+                                ]
+                            }
+                        }
+                    )
+
+                # Send tool results back to Claude
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": tool_results
+                    }
+                )
+
+                # Claude now generates final answer
+                continue
+
+            # ------------------------------------------------
+            # Normal final response
+            # ------------------------------------------------
+
+            return self._extract_text(
+                output
+            )
+
+    # ========================================================
+    # STREAMING AGENT
+    # ========================================================
 
     def stream_chat(self, conversation_history):
-        """
-        Stream Claude's response from Amazon Bedrock.
-        """
 
         messages = self._build_messages(
             conversation_history
         )
 
-        response = self.client.converse_stream(
-            modelId=BEDROCK_MODEL_ID,
-            messages=messages,
-            inferenceConfig={
-                "maxTokens": MAX_TOKENS,
-                "temperature": TEMPERATURE,
-            },
+        # For Phase 4, we initially use the
+        # non-streaming Converse call for tool
+        # orchestration.
+
+        response = self._run_agent(
+            messages
         )
 
-        for event in response["stream"]:
+        yield response
 
-            # Claude text delta
-            if "contentBlockDelta" in event:
-
-                delta = event["contentBlockDelta"]
-
-                if "delta" in delta:
-                    text = delta["delta"].get("text")
-
-                    if text:
-                        yield text
+    # ========================================================
+    # MESSAGE CONVERSION
+    # ========================================================
 
     @staticmethod
-    def _build_messages(conversation_history):
-        """
-        Convert our conversation memory format
-        into Amazon Bedrock Converse format.
-        """
+    def _build_messages(
+        conversation_history
+    ):
 
         messages = []
 
         for message in conversation_history:
 
-            role = message["role"]
-            content = message["content"]
-
             messages.append(
                 {
-                    "role": role,
+                    "role": message["role"],
                     "content": [
                         {
-                            "text": content
+                            "text": message["content"]
                         }
                     ],
                 }
             )
 
         return messages
+
+    # ========================================================
+    # RESPONSE EXTRACTION
+    # ========================================================
+
+    @staticmethod
+    def _extract_text(message):
+
+        text_parts = []
+
+        for content in message.get(
+            "content",
+            []
+        ):
+
+            if "text" in content:
+
+                text_parts.append(
+                    content["text"]
+                )
+
+        return "".join(text_parts)
