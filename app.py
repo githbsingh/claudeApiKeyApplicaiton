@@ -1,40 +1,124 @@
+from pathlib import Path
+import tempfile
+
 import streamlit as st
 
 from config.settings import validate_settings
 from services.chat_service import ChatService
+from rag.rag_service import RAGService
 
+
+# ============================================================
+# CONFIG
+# ============================================================
 
 validate_settings()
-
 
 st.set_page_config(
     page_title="Enterprise AI Assistant",
     page_icon="🤖"
 )
 
-
 st.title("🤖 Enterprise AI Assistant")
 
 st.caption(
-    "Claude + Amazon Bedrock + Tool Use"
+    "Claude + Amazon Bedrock + RAG + Tool Use"
 )
 
 
-if "messages" not in st.session_state:
+# ============================================================
+# SESSION STATE
+# ============================================================
 
+if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
 if "chat_service" not in st.session_state:
-
     st.session_state.chat_service = ChatService()
 
 
+if "rag_service" not in st.session_state:
+    st.session_state.rag_service = RAGService()
+
+
 chat_service = st.session_state.chat_service
+rag_service = st.session_state.rag_service
 
 
 # ============================================================
-# DISPLAY HISTORY
+# SIDEBAR - KNOWLEDGE BASE
+# ============================================================
+
+st.sidebar.header("📚 Knowledge Base")
+
+uploaded_file = st.sidebar.file_uploader(
+    "Upload PDF or TXT",
+    type=["pdf", "txt"]
+)
+
+
+if uploaded_file:
+
+    if st.sidebar.button("📥 Ingest Document"):
+
+        suffix = Path(uploaded_file.name).suffix
+
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=suffix
+        ) as tmp:
+
+            tmp.write(
+                uploaded_file.getbuffer()
+            )
+
+            temp_path = tmp.name
+
+        try:
+
+            with st.spinner(
+                "Processing document..."
+            ):
+
+                chunk_count = rag_service.ingest(
+                    temp_path
+                )
+
+            st.sidebar.success(
+                f"Successfully ingested {uploaded_file.name}"
+            )
+
+        except Exception as e:
+
+            st.sidebar.error(
+                f"Ingestion failed: {e}"
+            )
+
+            st.exception(e)
+
+        finally:
+
+            Path(temp_path).unlink(
+                missing_ok=True
+            )
+
+
+# ============================================================
+# CLEAR CONVERSATION
+# ============================================================
+
+if st.sidebar.button(
+    "🗑️ Clear Conversation"
+):
+
+    st.session_state.messages = []
+
+    st.rerun()
+
+
+# ============================================================
+# DISPLAY CHAT HISTORY
 # ============================================================
 
 for message in st.session_state.messages:
@@ -49,33 +133,24 @@ for message in st.session_state.messages:
 
 
 # ============================================================
-# CLEAR
-# ============================================================
-
-if st.sidebar.button(
-    "🗑️ Clear Conversation"
-):
-
-    st.session_state.messages = []
-
-    st.rerun()
-
-
-# ============================================================
 # CHAT
 # ============================================================
 
 prompt = st.chat_input(
-    "Ask me anything..."
+    "Ask a question about the uploaded document..."
 )
 
 
 if prompt:
 
+    # --------------------------------------------------------
+    # Display user message
+    # --------------------------------------------------------
+
     st.session_state.messages.append(
         {
             "role": "user",
-            "content": prompt,
+            "content": prompt
         }
     )
 
@@ -84,20 +159,66 @@ if prompt:
         st.markdown(prompt)
 
 
-    with st.chat_message("assistant"):
+    # --------------------------------------------------------
+    # RAG RETRIEVAL
+    # --------------------------------------------------------
 
-        response = st.write_stream(
+    retrieved_chunks = rag_service.retrieve(
+        prompt,
+        top_k=5
+    )
 
-            chat_service.stream_chat(
-                st.session_state.messages
-            )
 
+    # --------------------------------------------------------
+    # NO RELEVANT DOCUMENT INFORMATION
+    # --------------------------------------------------------
+
+    if not retrieved_chunks:
+
+        answer = (
+            "I couldn't find this information "
+            "in the uploaded document."
         )
 
+        with st.chat_message("assistant"):
+
+            st.markdown(answer)
+
+
+    # --------------------------------------------------------
+    # DOCUMENT CONTEXT FOUND
+    # --------------------------------------------------------
+
+    else:
+
+        grounded_prompt = rag_service.build_prompt(
+            prompt,
+            retrieved_chunks
+        )
+
+        with st.chat_message("assistant"):
+
+            response = st.write_stream(
+                chat_service.stream_chat(
+                    [
+                        {
+                            "role": "user",
+                            "content": grounded_prompt
+                        }
+                    ]
+                )
+            )
+
+            answer = response
+
+
+    # --------------------------------------------------------
+    # SAVE ASSISTANT RESPONSE
+    # --------------------------------------------------------
 
     st.session_state.messages.append(
         {
             "role": "assistant",
-            "content": response,
+            "content": answer
         }
     )
